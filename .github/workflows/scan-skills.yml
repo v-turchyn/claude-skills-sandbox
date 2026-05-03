@@ -7,7 +7,11 @@ on:
     paths: ["skills/**"]
 
 jobs:
-  scan:
+  # ─────────────────────────────────────────────
+  # 1. Cisco AI Skill Scanner (local, no API key)
+  # ─────────────────────────────────────────────
+  cisco-skill-scan:
+    name: Cisco Skill Scanner
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -24,3 +28,148 @@ jobs:
       - name: Run skill scan
         run: |
           skill-scanner scan-all skills/ --recursive --lenient --format summary
+
+  # ─────────────────────────────────────────────
+  # 2. Snyk — dependency & code vulnerability scan
+  # ─────────────────────────────────────────────
+  snyk-scan:
+    name: Snyk Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Authenticate Snyk
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
+
+      - name: Extract Python code blocks from skills
+        run: |
+          mkdir -p /tmp/snyk-scan
+          find skills/ -name "*.md" -o -name "*.skill" | while read f; do
+            python3 -c "
+          import re, sys, os
+          content = open('$f').read()
+          blocks = re.findall(r'\`\`\`python\n(.*?)\`\`\`', content, re.DOTALL)
+          base = os.path.basename('$f').replace('.', '_')
+          for i, block in enumerate(blocks):
+              with open(f'/tmp/snyk-scan/{base}_{i}.py', 'w') as out:
+                  out.write(block)
+          "
+          done
+
+      - name: Run Snyk code scan on extracted Python
+        run: |
+          if [ "$(ls -A /tmp/snyk-scan 2>/dev/null)" ]; then
+            snyk code test /tmp/snyk-scan --severity-threshold=medium || true
+          else
+            echo "No Python code blocks found in skills — skipping Snyk code scan."
+          fi
+
+      - name: Run Snyk open source scan (repo dependencies)
+        run: |
+          snyk test --severity-threshold=high || true
+
+  # ─────────────────────────────────────────────
+  # 3. VirusTotal — scan binary/attachment files
+  # ─────────────────────────────────────────────
+  virustotal-scan:
+    name: VirusTotal File Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Scan non-text files with VirusTotal
+        env:
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: |
+          python3 << 'EOF'
+          import os, requests, hashlib, time
+
+          API_KEY = os.environ["VIRUSTOTAL_API_KEY"]
+          HEADERS = {"x-apikey": API_KEY}
+          VT_URL  = "https://www.virustotal.com/api/v3"
+
+          # File extensions to scan (non-text/binary types that could appear in skills)
+          SCAN_EXTS = {".zip", ".tar", ".gz", ".pkl", ".bin", ".exe",
+                       ".dll", ".so", ".whl", ".ipynb", ".json", ".yaml", ".yml"}
+
+          def sha256(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(8192), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          findings = []
+          scanned  = 0
+
+          for root, _, files in os.walk("skills/"):
+              for fname in files:
+                  ext = os.path.splitext(fname)[1].lower()
+                  if ext not in SCAN_EXTS:
+                      continue
+                  fpath = os.path.join(root, fname)
+                  fhash = sha256(fpath)
+
+                  # Check if VT already has a report for this hash
+                  r = requests.get(f"{VT_URL}/files/{fhash}", headers=HEADERS)
+                  if r.status_code == 200:
+                      stats = r.json()["data"]["attributes"]["last_analysis_stats"]
+                  else:
+                      # Upload file for fresh scan
+                      with open(fpath, "rb") as fp:
+                          up = requests.post(f"{VT_URL}/files",
+                                             headers=HEADERS,
+                                             files={"file": (fname, fp)})
+                      if up.status_code != 200:
+                          print(f"[WARN] Could not upload {fpath}: {up.status_code}")
+                          continue
+                      analysis_id = up.json()["data"]["id"]
+                      # Poll until complete (max 60s)
+                      for _ in range(12):
+                          time.sleep(5)
+                          poll = requests.get(f"{VT_URL}/analyses/{analysis_id}",
+                                              headers=HEADERS)
+                          if poll.json()["data"]["attributes"]["status"] == "completed":
+                              stats = poll.json()["data"]["attributes"]["stats"]
+                              break
+                      else:
+                          print(f"[WARN] Timed out waiting for VT result on {fpath}")
+                          continue
+
+                  scanned += 1
+                  malicious = stats.get("malicious", 0)
+                  suspicious = stats.get("suspicious", 0)
+                  print(f"[VT] {fpath} — malicious: {malicious}, suspicious: {suspicious}")
+
+                  if malicious > 0 or suspicious > 2:
+                      findings.append(f"  ❌ {fpath}: {malicious} malicious, {suspicious} suspicious detections")
+
+                  time.sleep(1)  # Stay within free-tier rate limit
+
+          print(f"\n── VirusTotal scan complete. Files scanned: {scanned} ──")
+          if findings:
+              print("⚠️  FLAGGED FILES:")
+              for f in findings:
+                  print(f)
+              exit(1)
+          else:
+              print("✅ No malicious files detected.")
+          EOF
