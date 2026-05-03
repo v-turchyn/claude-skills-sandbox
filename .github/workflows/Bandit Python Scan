@@ -1,0 +1,20 @@
+name: Bandit Python Scan
+on: [push, pull_request]
+jobs:
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install bandit
+      - run: |
+          # Extract Python code blocks from markdown and scan them
+          find skills/ -name "*.md" -o -name "*.skill" | xargs grep -l '```python' | while read f; do
+            python3 -c "
+          import re, sys
+          content = open('$f').read()
+          blocks = re.findall(r'\`\`\`python\n(.*?)\`\`\`', content, re.DOTALL)
+          for i, block in enumerate(blocks):
+              open(f'/tmp/skill_block_{i}.py', 'w').write(block)
+          " 
+          done
+          find /tmp -name "skill_block_*.py" -exec bandit {} \; 2>/dev/null || true
