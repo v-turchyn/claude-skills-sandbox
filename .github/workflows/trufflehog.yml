@@ -1,4 +1,5 @@
 name: Security Scan
+
 on: [push, pull_request]
 
 jobs:
@@ -7,10 +8,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # ← This is the key fix: fetch full history
 
       - name: Secret Scanning
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
+          extra_args: --only-verified
