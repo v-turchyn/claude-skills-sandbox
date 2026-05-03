@@ -1,17 +1,26 @@
-# .github/workflows/scan-skills.yml
-name: Scan Skills
+name: Scan Claude Skills
 
 on:
   push:
-    paths: ["skills/**"]      # Run whenever files in the skills/ folder change
+    paths: ["skills/**"]
   pull_request:
     paths: ["skills/**"]
 
 jobs:
   scan:
-    uses: cisco-ai-defense/skill-scanner/.github/workflows/scan-skills.yml@main
-    with:
-      skill_path: skills       # The folder where your skill files live
-    permissions:
-      security-events: write   # Allows scan results to appear in GitHub's Security tab
-      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Cisco Skill Scanner
+        run: pip install cisco-ai-skill-scanner
+
+      - name: Run skill scan
+        run: |
+          skill-scanner scan-all skills/ --recursive --lenient --format summary
