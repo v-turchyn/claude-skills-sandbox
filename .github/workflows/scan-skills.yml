@@ -8,10 +8,36 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────
+  # Guard: skip everything if this is a deletion
+  # ─────────────────────────────────────────────
+  check-files:
+    name: Check for skill files
+    runs-on: ubuntu-latest
+    outputs:
+      has_skills: ${{ steps.check.outputs.has_skills }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if skill files exist
+        id: check
+        run: |
+          COUNT=$(find skills/ \( -name "*.md" -o -name "*.skill" \) 2>/dev/null | wc -l)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "has_skills=true" >> $GITHUB_OUTPUT
+            echo "✅ Found $COUNT skill file(s) — scans will run."
+          else
+            echo "has_skills=false" >> $GITHUB_OUTPUT
+            echo "⏭️  No skill files found (deletion commit) — all scans skipped."
+          fi
+
+  # ─────────────────────────────────────────────
   # 1. Cisco AI Skill Scanner (local, no API key)
   # ─────────────────────────────────────────────
   cisco-skill-scan:
     name: Cisco Skill Scanner
+    needs: check-files
+    if: needs.check-files.outputs.has_skills == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -34,6 +60,8 @@ jobs:
   # ─────────────────────────────────────────────
   snyk-scan:
     name: Snyk Security Scan
+    needs: check-files
+    if: needs.check-files.outputs.has_skills == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -53,9 +81,9 @@ jobs:
       - name: Extract Python code blocks from skills
         run: |
           mkdir -p /tmp/snyk-scan
-          find skills/ -name "*.md" -o -name "*.skill" | while read f; do
+          find skills/ \( -name "*.md" -o -name "*.skill" \) | while read f; do
             python3 -c "
-          import re, sys, os
+          import re, os
           content = open('$f', encoding='utf-8', errors='ignore').read()
           blocks = re.findall(r'\`\`\`python\n(.*?)\`\`\`', content, re.DOTALL)
           base = os.path.basename('$f').replace('.', '_')
@@ -82,6 +110,8 @@ jobs:
   # ─────────────────────────────────────────────
   virustotal-scan:
     name: VirusTotal File Scan
+    needs: check-files
+    if: needs.check-files.outputs.has_skills == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -106,7 +136,6 @@ jobs:
           HEADERS = {"x-apikey": API_KEY}
           VT_URL  = "https://www.virustotal.com/api/v3"
 
-          # File extensions to scan (non-text/binary types that could appear in skills)
           SCAN_EXTS = {".zip", ".tar", ".gz", ".pkl", ".bin", ".exe",
                        ".dll", ".so", ".whl", ".ipynb", ".json", ".yaml", ".yml"}
 
@@ -128,12 +157,10 @@ jobs:
                   fpath = os.path.join(root, fname)
                   fhash = sha256(fpath)
 
-                  # Check if VT already has a report for this hash
                   r = requests.get(f"{VT_URL}/files/{fhash}", headers=HEADERS)
                   if r.status_code == 200:
                       stats = r.json()["data"]["attributes"]["last_analysis_stats"]
                   else:
-                      # Upload file for fresh scan
                       with open(fpath, "rb") as fp:
                           up = requests.post(f"{VT_URL}/files",
                                              headers=HEADERS,
@@ -142,7 +169,6 @@ jobs:
                           print(f"[WARN] Could not upload {fpath}: {up.status_code}")
                           continue
                       analysis_id = up.json()["data"]["id"]
-                      # Poll until complete (max 60s)
                       for _ in range(12):
                           time.sleep(5)
                           poll = requests.get(f"{VT_URL}/analyses/{analysis_id}",
@@ -155,14 +181,14 @@ jobs:
                           continue
 
                   scanned += 1
-                  malicious = stats.get("malicious", 0)
+                  malicious  = stats.get("malicious", 0)
                   suspicious = stats.get("suspicious", 0)
                   print(f"[VT] {fpath} — malicious: {malicious}, suspicious: {suspicious}")
 
                   if malicious > 0 or suspicious > 2:
-                      findings.append(f"  ❌ {fpath}: {malicious} malicious, {suspicious} suspicious detections")
+                      findings.append(f"  ❌ {fpath}: {malicious} malicious, {suspicious} suspicious")
 
-                  time.sleep(1)  # Stay within free-tier rate limit
+                  time.sleep(1)
 
           print(f"\n── VirusTotal scan complete. Files scanned: {scanned} ──")
           if findings:
