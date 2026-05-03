@@ -25,7 +25,7 @@ jobs:
           find skills/ \( -name "*.md" -o -name "*.skill" \) | while read f; do
             python3 -c "
           import re, os
-          content = open('$f').read()
+          content = open('$f', encoding='utf-8', errors='ignore').read()
           blocks = re.findall(r'\`\`\`python\n(.*?)\`\`\`', content, re.DOTALL)
           base = os.path.basename('$f').replace('.', '_')
           for i, block in enumerate(blocks):
