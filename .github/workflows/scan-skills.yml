@@ -4,13 +4,9 @@ on:
   push:
     paths:
       - "skills/**"
-    paths-ignore:
-      - ".github/workflows/**"
   pull_request:
     paths:
       - "skills/**"
-    paths-ignore:
-      - ".github/workflows/**"
 
 permissions:
   contents: read
