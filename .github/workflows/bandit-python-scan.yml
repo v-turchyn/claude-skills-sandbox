@@ -1,11 +1,22 @@
 name: Bandit Python Scan
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+      - ".github/workflows/**"
+  pull_request:
+    paths-ignore:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
 
 jobs:
   bandit:
     name: Bandit Static Analysis
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,7 +33,7 @@ jobs:
         run: |
           mkdir -p /tmp/bandit-blocks
 
-          find skills/ \( -name "*.md" -o -name "*.skill" \) | while read f; do
+          find skills/ \( -name "*.md" -o -name "*.skill" \) 2>/dev/null | while read f; do
             python3 -c "
           import re, os
           content = open('$f', encoding='utf-8', errors='ignore').read()
