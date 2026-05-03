@@ -2,9 +2,18 @@ name: Scan Claude Skills
 
 on:
   push:
-    paths: ["skills/**"]
+    paths:
+      - "skills/**"
+    paths-ignore:
+      - ".github/workflows/**"
   pull_request:
-    paths: ["skills/**"]
+    paths:
+      - "skills/**"
+    paths-ignore:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
 
 jobs:
   # ─────────────────────────────────────────────
@@ -39,6 +48,8 @@ jobs:
     needs: check-files
     if: needs.check-files.outputs.has_skills == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -63,6 +74,8 @@ jobs:
     needs: check-files
     if: needs.check-files.outputs.has_skills == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -113,6 +126,8 @@ jobs:
     needs: check-files
     if: needs.check-files.outputs.has_skills == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
