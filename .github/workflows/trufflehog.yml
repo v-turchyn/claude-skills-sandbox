@@ -1,16 +1,27 @@
 name: Security Scan
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+      - ".github/workflows/**"
+  pull_request:
+    paths-ignore:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
 
 jobs:
   scan:
+    name: Secret Scanning
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0        # ← This is the key fix: fetch full history
-
+          fetch-depth: 0
       - name: Secret Scanning
         uses: trufflesecurity/trufflehog@main
         with:
