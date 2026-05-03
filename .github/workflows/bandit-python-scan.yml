@@ -1,20 +1,42 @@
 name: Bandit Python Scan
+
 on: [push, pull_request]
+
 jobs:
   bandit:
+    name: Bandit Static Analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: pip install bandit
-      - run: |
-          # Extract Python code blocks from markdown and scan them
-          find skills/ -name "*.md" -o -name "*.skill" | xargs grep -l '```python' | while read f; do
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Extract Python code blocks from skills and scan
+        run: |
+          mkdir -p /tmp/bandit-blocks
+
+          find skills/ \( -name "*.md" -o -name "*.skill" \) | while read f; do
             python3 -c "
-          import re, sys
+          import re, os
           content = open('$f').read()
           blocks = re.findall(r'\`\`\`python\n(.*?)\`\`\`', content, re.DOTALL)
+          base = os.path.basename('$f').replace('.', '_')
           for i, block in enumerate(blocks):
-              open(f'/tmp/skill_block_{i}.py', 'w').write(block)
-          " 
+              with open(f'/tmp/bandit-blocks/{base}_{i}.py', 'w') as out:
+                  out.write(block)
+          "
           done
-          find /tmp -name "skill_block_*.py" -exec bandit {} \; 2>/dev/null || true
+
+          if [ "$(ls -A /tmp/bandit-blocks 2>/dev/null)" ]; then
+            echo "── Running Bandit on extracted Python blocks ──"
+            bandit /tmp/bandit-blocks/*.py -ll -ii || true
+          else
+            echo "No Python code blocks found in skills — skipping Bandit scan."
+          fi
